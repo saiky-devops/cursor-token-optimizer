@@ -1,0 +1,4 @@
+{"role":"user","message":{"content":[{"type":"text","text":"<user_query>\nReview the entire codebase and refactor everything\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"Glob","input":{"glob_pattern":"**/*"}},{"type":"tool_use","name":"Read","input":{"path":"/app/node_modules/lodash/index.js"}},{"type":"tool_use","name":"Read","input":{"path":"/app/src/main.py"}},{"type":"tool_use","name":"Grep","input":{"pattern":"class","path":"/app"}}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"<user_query>\nReview the entire codebase and refactor everything please try again\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"I'll scan more files and propose a plan."},{"type":"tool_use","name":"Read","input":{"path":"/app/src/main.py"}},{"type":"tool_use","name":"Glob","input":{"glob_pattern":"**/*.ts"}}]}}
