@@ -86,6 +86,62 @@ Other subcommands and flags:
 | `--limit` | 20 | Max sessions to analyze |
 | `--all` | off (`run` scans all projects by default) | On `analyze` / `suggest`: scan every Cursor project |
 
+## Sample output
+
+`analyze` and `run` render a **color-coded report**: summary panel, findings table (severity in red/yellow), detail panels, and per-session summaries.
+
+```bash
+cursor-token-optimize analyze --all --limit 2
+```
+
+```text
+Cursor Token Optimize — Token Waste Report
+========================================
+Sessions scanned: 2
+Estimated tokens (rough): ~122,406
+
+Overall findings (all sessions)
+----------------------------------------
+1. [HIGH] High tool-call volume (score 514)
+   285 tool calls in one session.
+   → Split the task into phases. Cancel and restart with a narrower goal if the agent loops.
+2. [HIGH] Very long chat history (score 396)
+   218 turns in one session (47 user, 171 assistant).
+   → Start a fresh chat for new topics. Summarize decisions in a RULES file instead of re-explaining.
+3. [HIGH] Too many files added to context (score 362)
+   144 file-discovery tool calls (51 unique reads). Top tools: Read=99, StrReplace=48, Shell=40, Write=32, Grep=30.
+   → Point Cursor at specific files. Add rules to avoid repo-wide scans unless necessary.
+…
+
+Session Summary
+- ID: 7585639b…  (7585639b-a1a4-48a0-aa3d-d01dbb233bb8.jsonl)
+- Turns: 218  |  Est. tokens: ~66,650  |  Waste score: 752
+- High token usage patterns found
+- Main reason: high tool-call volume
+  285 tool calls in one session.
+- Second reason: very long chat history
+  218 turns in one session (47 user, 171 assistant).
+
+Suggestion:
+Split the task into phases. Cancel and restart with a narrower goal if the agent loops.
+
+Quick actions
+----------------------------------------
+  cursor-token-optimize run                # analyze, prompt for path, install rules
+  cursor-token-optimize suggest --apply    # append tailored rules to an existing file
+```
+
+After `run` installs rules, you get a success panel:
+
+```text
+Rules installed
+  Project: /path/to/my-app
+  File:    /path/to/my-app/.cursor/rules/token-optimize.mdc
+  Backup:  /path/to/my-app/.cursor/rules/token-optimize.backup.20260526-203814.mdc
+```
+
+Numbers and findings depend on your local Cursor agent transcripts.
+
 ## How analysis works
 
 This tool does **not** read Cursor's billing or real token meters. It uses transcript content plus fixed heuristics.
