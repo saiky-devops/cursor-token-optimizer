@@ -1,8 +1,28 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from rich.console import Console, RenderableType
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
 from cursor_token_optimize.models import AnalysisReport, SessionAnalysis, WasteFinding
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+
+
+def _severity_style(severity: str) -> str:
+    styles = {
+        "high": "bold red",
+        "medium": "yellow",
+        "low": "dim",
+    }
+    return styles.get(severity.lower(), "white")
+
+
+def _use_plain(console: Console) -> bool:
+    return console.no_color or not console.is_terminal
 
 
 def format_report(report: AnalysisReport) -> str:
@@ -21,7 +41,7 @@ def format_report(report: AnalysisReport) -> str:
         lines.append("")
         lines.append("Tips:")
         lines.append("- Use Cursor Agent mode in this project, then re-run analyze.")
-        lines.append(f"- Transcripts live under ~/.cursor/projects/*/agent-transcripts/")
+        lines.append("- Transcripts live under ~/.cursor/projects/*/agent-transcripts/")
         return "\n".join(lines)
 
     agg = report.aggregate_findings
@@ -60,7 +80,11 @@ def _format_session(sa: SessionAnalysis) -> list[str]:
     primary = sa.primary_finding
     secondary = sa.findings[1] if len(sa.findings) > 1 else None
 
-    lines.append("- High token usage patterns found" if sa.waste_score >= 10 else "- Some optimization opportunities found")
+    lines.append(
+        "- High token usage patterns found"
+        if sa.waste_score >= 10
+        else "- Some optimization opportunities found"
+    )
     if primary:
         lines.append(f"- Main reason: {primary.title.lower()}")
         lines.append(f"  {primary.detail}")
@@ -77,6 +101,133 @@ def _format_session(sa: SessionAnalysis) -> list[str]:
     return lines
 
 
+def _summary_table(report: AnalysisReport) -> Table:
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("Key", style="dim")
+    table.add_column("Value")
+    if report.project_path:
+        table.add_row("Project", str(report.project_path))
+    table.add_row("Sessions scanned", str(len(report.sessions)))
+    table.add_row("Est. tokens (rough)", f"~{report.total_estimated_tokens:,}")
+    return table
+
+
+def _findings_table(findings: list[WasteFinding]) -> Table:
+    table = Table(title="Overall findings (all sessions)", expand=True)
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Severity", width=8)
+    table.add_column("Finding")
+    table.add_column("Score", justify="right", width=6)
+
+    for i, f in enumerate(findings[:5], 1):
+        severity = Text(f.severity.upper(), style=_severity_style(f.severity))
+        table.add_row(str(i), severity, f.title, str(f.score))
+
+    return table
+
+
+def _finding_detail_panels(findings: list[WasteFinding]) -> list[RenderableType]:
+    panels: list[RenderableType] = []
+    for i, f in enumerate(findings[:5], 1):
+        body = Text.assemble(
+            (f.detail + "\n\n", ""),
+            ("→ ", "dim"),
+            (f.suggestion, "cyan"),
+        )
+        panels.append(
+            Panel(
+                body,
+                title=f"[{_severity_style(f.severity)}]{i}. {f.title}[/]",
+                border_style=_severity_style(f.severity),
+            )
+        )
+    return panels
+
+
+def _session_panel(sa: SessionAnalysis) -> Panel:
+    s = sa.session
+    lines: list[str | Text] = [
+        f"[dim]ID[/] {s.session_id[:8]}…  ({s.transcript_path.name})",
+        (
+            f"[dim]Turns[/] {len(s.turns)}  "
+            f"[dim]Est. tokens[/] ~{sa.estimated_tokens:,}  "
+            f"[dim]Waste score[/] {sa.waste_score}"
+        ),
+    ]
+
+    if not sa.findings:
+        lines.append("")
+        lines.append("[dim]No major waste patterns detected in this session.[/]")
+    else:
+        primary = sa.primary_finding
+        secondary = sa.findings[1] if len(sa.findings) > 1 else None
+        status = (
+            "High token usage patterns found"
+            if sa.waste_score >= 10
+            else "Some optimization opportunities found"
+        )
+        lines.append("")
+        lines.append(status)
+        if primary:
+            lines.append(f"[bold]Main reason:[/] {primary.title.lower()}")
+            lines.append(f"  {primary.detail}")
+        if secondary:
+            lines.append(f"[bold]Second reason:[/] {secondary.title.lower()}")
+            lines.append(f"  {secondary.detail}")
+        lines.append("")
+        lines.append("[bold]Suggestion:[/]")
+        if primary:
+            lines.append(primary.suggestion)
+        else:
+            lines.append("Ask smaller questions and add clear project rules.")
+
+    return Panel("\n".join(str(line) for line in lines), title="Session Summary", border_style="blue")
+
+
+def print_report(console: Console, report: AnalysisReport) -> None:
+    if _use_plain(console):
+        print(format_report(report))
+        return
+
+    console.print(
+        Panel(
+            _summary_table(report),
+            title="[bold]Cursor Token Optimize[/] — Token Waste Report",
+            border_style="green",
+        )
+    )
+    console.print()
+
+    if not report.sessions:
+        tips = (
+            "No Cursor agent transcripts found.\n\n"
+            "• Use Cursor Agent mode in this project, then re-run analyze.\n"
+            "• Transcripts live under ~/.cursor/projects/*/agent-transcripts/"
+        )
+        console.print(Panel(tips, title="Tips", border_style="yellow"))
+        return
+
+    agg = report.aggregate_findings
+    if agg:
+        console.print(_findings_table(agg))
+        console.print()
+        for panel in _finding_detail_panels(agg):
+            console.print(panel)
+            console.print()
+
+    for sa in report.sessions[:5]:
+        console.print(_session_panel(sa))
+        console.print()
+
+    actions = (
+        "cursor-token-optimize run                "
+        "[dim]# analyze, prompt for path, install rules[/]\n"
+        "cursor-token-optimize suggest --apply    "
+        "[dim]# append tailored rules to an existing file[/]"
+    )
+    console.print(Panel(actions, title="Quick actions", border_style="dim"))
+
+
 def format_suggestions(report: AnalysisReport, existing_rules: str | None = None) -> str:
     lines: list[str] = []
     lines.append("Suggested rule updates for .cursor/rules/token-optimize.mdc")
@@ -90,7 +241,7 @@ def format_suggestions(report: AnalysisReport, existing_rules: str | None = None
 
     suggestions = rules_from_findings(agg, existing_rules)
     for item in suggestions:
-        lines.append(f"Add this rule:")
+        lines.append("Add this rule:")
         lines.append(f'  "{item["rule"]}"')
         lines.append("")
         lines.append("Reason:")
@@ -98,6 +249,124 @@ def format_suggestions(report: AnalysisReport, existing_rules: str | None = None
         lines.append("")
 
     return "\n".join(lines).rstrip()
+
+
+def print_suggestions(
+    console: Console,
+    report: AnalysisReport,
+    existing_rules: str | None = None,
+) -> None:
+    if _use_plain(console):
+        print(format_suggestions(report, existing_rules))
+        return
+
+    agg = report.aggregate_findings
+    if not agg:
+        console.print(
+            Panel(
+                "No findings yet — run `cursor-token-optimize analyze` after using Cursor Agent.",
+                title="Suggested rule updates",
+                border_style="yellow",
+            )
+        )
+        return
+
+    suggestions = rules_from_findings(agg, existing_rules)
+    console.print(
+        Panel(
+            "Tailored bullets for .cursor/rules/token-optimize.mdc",
+            title="[bold]Suggested rule updates[/]",
+            border_style="green",
+        )
+    )
+    console.print()
+
+    if not suggestions:
+        console.print("[dim]No new rules to suggest (existing file may already cover these findings).[/]")
+        return
+
+    for i, item in enumerate(suggestions, 1):
+        body = Text.assemble(
+            ("Rule\n", "bold"),
+            (f'"{item["rule"]}"\n\n', "cyan"),
+            ("Reason\n", "bold"),
+            (item["reason"], ""),
+        )
+        console.print(Panel(body, title=f"Suggestion {i}", border_style="blue"))
+        console.print()
+
+
+def print_rules_installed(
+    console: Console,
+    project: Path,
+    path: Path,
+    backup: Path | None,
+) -> None:
+    if _use_plain(console):
+        print("")
+        print("Rules installed")
+        print(f"  Project: {project}")
+        print(f"  File:    {path}")
+        if backup:
+            print(f"  Backup:  {backup}")
+        else:
+            print("  Backup:  (none — no previous file)")
+        print("")
+        print(
+            "Open this project in Cursor and commit .cursor/rules/token-optimize.mdc to share with your team."
+        )
+        return
+
+    lines = [
+        f"[dim]Project[/] {project}",
+        f"[dim]File[/]    {path}",
+        f"[dim]Backup[/]  {backup if backup else '(none — no previous file)'}",
+        "",
+        "Open this project in Cursor and commit .cursor/rules/token-optimize.mdc to share with your team.",
+    ]
+    console.print()
+    console.print(Panel("\n".join(lines), title="[bold green]Rules installed[/]", border_style="green"))
+
+
+def print_rules_updated(console: Console, path: Path) -> None:
+    if _use_plain(console):
+        print("")
+        print(f"Updated rules (with backup): {path}")
+        return
+
+    console.print()
+    console.print(
+        Panel(
+            str(path),
+            title="[bold green]Updated rules[/]",
+            subtitle="Previous file backed up",
+            border_style="green",
+        )
+    )
+
+
+def print_rules_create(console: Console, path: Path, backup: Path | None) -> None:
+    if _use_plain(console):
+        print(f"Installed rules: {path}")
+        if backup:
+            print(f"Previous file backed up to: {backup}")
+        return
+
+    lines = [f"[dim]File[/] {path}"]
+    if backup:
+        lines.append(f"[dim]Backup[/] {backup}")
+    console.print(Panel("\n".join(lines), title="[bold green]Installed rules[/]", border_style="green"))
+
+
+def print_nothing_to_apply(console: Console) -> None:
+    msg = "Nothing new to apply (rules may already cover these findings)."
+    if _use_plain(console):
+        print("")
+        print(msg)
+        return
+
+    console.print()
+    console.print(Panel(msg, border_style="yellow"))
 
 
 def rules_from_findings(

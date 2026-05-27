@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
+from rich.console import Console
+from rich.panel import Panel
+from rich.prompt import Confirm, Prompt
+
 from cursor_token_optimize.analyzer import analyze_project
-from cursor_token_optimize.report import format_report, format_suggestions, rules_from_findings
+from cursor_token_optimize.report import (
+    print_nothing_to_apply,
+    print_report,
+    print_rules_create,
+    print_rules_installed,
+    print_rules_updated,
+    print_suggestions,
+    rules_from_findings,
+)
 from cursor_token_optimize.rules import (
     append_suggested_rules,
     build_rules_content,
@@ -21,84 +34,79 @@ def _resolve_project(path: str | None) -> Path:
     return Path.cwd().resolve()
 
 
-def _prompt_project_path(default: Path | None = None) -> Path:
+def make_console(no_color: bool = False) -> Console:
+    env_no_color = os.environ.get("NO_COLOR", "") != ""
+    if no_color or env_no_color:
+        return Console(no_color=True)
+    return Console()
+
+
+def _prompt_project_path(console: Console, default: Path | None = None) -> Path:
     default = default or Path.cwd()
-    print("")
-    print("Install Cursor rules")
-    print(f"  → {{your-project}}/.cursor/rules/token-optimize.mdc")
-    print("")
+    console.print()
+    console.print(
+        Panel(
+            "Rules will be written to:\n  {your-project}/.cursor/rules/token-optimize.mdc",
+            title="Install Cursor rules",
+            border_style="cyan",
+        )
+    )
+    console.print()
 
     while True:
-        raw = input(f"Project path [{default}]: ").strip()
+        raw = Prompt.ask("Project path", default=str(default), console=console).strip()
         path = Path(raw).expanduser().resolve() if raw else default
         if path.exists() and path.is_dir():
             return path
-        print(f"  Not a directory: {path}")
-        again = input("  Try again? [Y/n]: ").strip().lower()
-        if again == "n":
-            print("Aborted.", file=sys.stderr)
+        console.print(f"[red]Not a directory:[/] {path}")
+        if not Confirm.ask("Try again?", default=True, console=console):
+            console.print("[red]Aborted.[/]", file=sys.stderr)
             sys.exit(1)
 
 
-def cmd_run(args: argparse.Namespace) -> int:
+def cmd_run(args: argparse.Namespace, console: Console) -> int:
     report = analyze_project(project_path=None, days=args.days, limit=args.limit)
-    print(format_report(report))
+    print_report(console, report)
 
-    project = _resolve_project(args.project) if args.project else _prompt_project_path()
-    target = rules_path(project)
+    project = _resolve_project(args.project) if args.project else _prompt_project_path(console)
     content = build_rules_content(report)
     path, backup = install_rules(project, content)
-
-    print("")
-    print("Rules installed")
-    print(f"  Project: {project}")
-    print(f"  File:    {path}")
-    if backup:
-        print(f"  Backup:  {backup}")
-    else:
-        print("  Backup:  (none — no previous file)")
-    print("")
-    print("Open this project in Cursor and commit .cursor/rules/token-optimize.mdc to share with your team.")
+    print_rules_installed(console, project, path, backup)
     return 0
 
 
-def cmd_analyze(args: argparse.Namespace) -> int:
+def cmd_analyze(args: argparse.Namespace, console: Console) -> int:
     project = None if getattr(args, "all_projects", False) else _resolve_project(args.project)
     report = analyze_project(project_path=project, days=args.days, limit=args.limit)
-    print(format_report(report))
+    print_report(console, report)
     return 0
 
 
-def cmd_create_rules(args: argparse.Namespace) -> int:
+def cmd_create_rules(args: argparse.Namespace, console: Console) -> int:
     project = _resolve_project(args.project)
     content = build_rules_content() if not args.tailored else build_rules_content(
         analyze_project(project_path=None, days=30, limit=20)
     )
     path, backup = install_rules(project, content)
-    print(f"Installed rules: {path}")
-    if backup:
-        print(f"Previous file backed up to: {backup}")
+    print_rules_create(console, path, backup)
     return 0
 
 
-def cmd_suggest(args: argparse.Namespace) -> int:
+def cmd_suggest(args: argparse.Namespace, console: Console) -> int:
     project = _resolve_project(args.project)
     scan_project = None if getattr(args, "all_projects", False) else project
     report = analyze_project(project_path=scan_project, days=args.days, limit=args.limit)
     existing = read_rules(project)
-    text = format_suggestions(report, existing)
-    print(text)
+    print_suggestions(console, report, existing)
 
     if args.apply:
         items = rules_from_findings(report.aggregate_findings, existing)
         bullets = [i["rule"] for i in items]
         if bullets:
             path = append_suggested_rules(project, bullets)
-            print("")
-            print(f"Updated rules (with backup): {path}")
+            print_rules_updated(console, path)
         else:
-            print("")
-            print("Nothing new to apply (rules may already cover these findings).")
+            print_nothing_to_apply(console)
     return 0
 
 
@@ -123,9 +131,17 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable colored terminal output (also respects NO_COLOR=1)",
+    )
+
     parser = argparse.ArgumentParser(
         prog="cursor-token-optimize",
         description="Analyze Cursor agent sessions and install token-saving rules.",
+        parents=[shared],
     )
 
     sub = parser.add_subparsers(dest="command", required=True)
@@ -133,10 +149,15 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser(
         "run",
         help="Analyze all sessions, prompt for project path, install rules (with backup)",
+        parents=[shared],
     )
     _add_common_args(run)
 
-    analyze = sub.add_parser("analyze", help="Analyze Cursor sessions and print a report")
+    analyze = sub.add_parser(
+        "analyze",
+        help="Analyze Cursor sessions and print a report",
+        parents=[shared],
+    )
     _add_common_args(analyze)
     analyze.add_argument(
         "--all",
@@ -145,7 +166,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Analyze transcripts from all Cursor projects (ignore --project)",
     )
 
-    create = sub.add_parser("create-rules", help="Install .cursor/rules/token-optimize.mdc (with backup)")
+    create = sub.add_parser(
+        "create-rules",
+        help="Install .cursor/rules/token-optimize.mdc (with backup)",
+        parents=[shared],
+    )
     create.add_argument(
         "--project",
         "-p",
@@ -157,7 +182,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include tailored rules from recent sessions (default: baseline only)",
     )
 
-    suggest = sub.add_parser("suggest", help="Suggest rule updates from recent sessions")
+    suggest = sub.add_parser(
+        "suggest",
+        help="Suggest rule updates from recent sessions",
+        parents=[shared],
+    )
     _add_common_args(suggest)
     suggest.add_argument(
         "--all",
@@ -177,6 +206,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
+    console = make_console(getattr(args, "no_color", False))
 
     commands = {
         "run": cmd_run,
@@ -185,9 +215,9 @@ def main(argv: list[str] | None = None) -> None:
         "suggest": cmd_suggest,
     }
     try:
-        code = commands[args.command](args)
+        code = commands[args.command](args, console)
     except KeyboardInterrupt:
-        print("\nInterrupted.", file=sys.stderr)
+        console.print("\nInterrupted.", style="red", file=sys.stderr)
         code = 130
     sys.exit(code)
 
