@@ -14,15 +14,13 @@ alwaysApply: true
 
 # Token Optimize Rules
 
-- Read only required files.
-- Keep changes small.
-- Do not scan the full repo unless needed.
-- Reuse existing project patterns.
-- Ask before doing large changes.
+- Include goal, constraints, and done-when in each message; trim filler, not requirements.
+- Target specific files; no repo-wide scans or **/* globs unless the user asks.
+- One task per message; start a fresh chat when the thread gets long.
+- Prefer concise replies; put long code in edits, not chat walls.
+- Read only required files; keep changes small; reuse existing project patterns.
+- Do not include node_modules, dist/, build output, or large logs unless requested.
 - Add tests when changing code.
-- Do not include large log files unless needed.
-- Prefer targeted grep/search over reading many files.
-- Summarize prior decisions instead of re-reading long chat history.
 """
 
 RULES_FILENAME = "token-optimize.mdc"

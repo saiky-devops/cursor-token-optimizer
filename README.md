@@ -157,12 +157,14 @@ This tool does **not** read Cursor's billing or real token meters. It uses trans
 | Pattern | Threshold | What it means |
 |---------|-----------|---------------|
 | Long prompts | User message ≥ 1500 chars | Large pasted specs or long asks |
+| Very long prompts | User message ≥ 4000 chars | Move spec to a doc; paste only the active section |
+| Thin prompt + exploration | Short asks (<120 chars) with ≥ 10 file-tool calls | Add scope (files, done-when) to avoid wide search |
 | Too many files | ≥ 12 Read/Glob/Grep calls **or** ≥ 8 unique reads | Agent pulled in lots of context |
-| Unnecessary reads | Paths under `node_modules`, `dist`, logs, etc. **or** same file read twice | Avoidable context bloat |
+| Repo-wide globs | ≥ 1 broad Glob pattern (e.g. `**/*`) | Full-repo scan instead of targeted search |
+| Unnecessary reads | `node_modules`, logs, etc. **or** same file read twice | Avoidable context bloat |
 | Long history | ≥ 25 turns in one session | Context accumulates across the thread |
 | Repeated retries | Similar consecutive user messages (≥ 72%) **or** assistant:user ratio ≥ 4:1 | Back-and-forth corrections |
-| Broad questions | Phrases like "review the entire codebase", "scan the whole repo" | Triggers repo-wide exploration |
-| Vague + exploratory | Short vague ask **and** ≥ 8 file-tool calls | Unclear goal → wide search |
+| Broad questions | "review entire codebase", etc. **or** vague ask + ≥ 8 file-tool calls | Triggers repo-wide exploration |
 | Runaway tools | ≥ 20 tool calls in one session | Possible agent loop |
 
 Each pattern gets a **score**. Sessions are ranked by total **waste score**. The `run` command merges baseline rules plus tailored bullets from your top findings.

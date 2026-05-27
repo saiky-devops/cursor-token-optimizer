@@ -378,6 +378,10 @@ def rules_from_findings(
             "rule": "Read only files needed for the current task; do not scan the full repo unless the user explicitly asks.",
             "reason": "Recent sessions triggered many file-discovery tool calls, which inflates context.",
         },
+        "broad_glob": {
+            "rule": "Do not use repo-wide globs like **/*; search targeted paths or grep patterns instead.",
+            "reason": "Broad Glob scans pulled in more context than the task required.",
+        },
         "unnecessary_reads": {
             "rule": "Do not include large log files, node_modules, dist/, or build artifacts unless explicitly requested.",
             "reason": "Noisy or repeated file reads increased token usage in recent sessions.",
@@ -385,6 +389,14 @@ def rules_from_findings(
         "long_prompts": {
             "rule": "Prefer small, scoped tasks. If the user pastes a long spec, ask which section to tackle first.",
             "reason": "Long user prompts were a major contributor to estimated token usage.",
+        },
+        "very_long_prompts": {
+            "rule": "Move large specs to a doc or RULES file; paste only the active section into chat.",
+            "reason": "Very long pasted specs dominated context without needing to live in every message.",
+        },
+        "thin_prompt_heavy_explore": {
+            "rule": "Short prompts must still include target files, expected output, constraints, and done-when.",
+            "reason": "Brief messages led to wide file exploration and extra context.",
         },
         "long_history": {
             "rule": "For long threads, summarize prior decisions briefly instead of re-reading entire history.",

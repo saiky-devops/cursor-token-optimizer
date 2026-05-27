@@ -18,19 +18,38 @@ VAGUE_QUESTION_RE = re.compile(
     re.IGNORECASE,
 )
 LOG_FILE_RE = re.compile(r"\.(log|jsonl)$|/(logs?)/", re.IGNORECASE)
+BROAD_GLOB_RE = re.compile(r"\*\*/\*|\*\*|\./\*|/\*\*")
 
 THRESHOLDS = {
     "long_prompt_chars": 1500,
+    "very_long_prompt_chars": 4000,
     "long_history_turns": 25,
     "many_file_reads": 12,
+    "unique_reads_min": 8,
+    "vague_explore_file_tools": 8,
     "many_tool_calls": 20,
     "assistant_per_user_ratio": 4.0,
     "retry_similarity": 0.72,
+    "broad_glob_calls": 1,
+    "thin_prompt_chars": 120,
+    "thin_prompt_file_tools": 10,
 }
 
 
 def _similar(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+
+def _broad_glob_calls(session: Session) -> int:
+    count = 0
+    for turn in session.turns:
+        for tc in turn.tool_calls:
+            if tc.name != "Glob":
+                continue
+            pattern = str(tc.input.get("glob_pattern") or tc.input.get("pattern") or "")
+            if BROAD_GLOB_RE.search(pattern):
+                count += 1
+    return count
 
 
 def analyze_session(session: Session) -> SessionAnalysis:
@@ -44,6 +63,8 @@ def analyze_session(session: Session) -> SessionAnalysis:
     unique_reads = set(read_paths)
     noise_reads = [p for p in read_paths if is_noise_path(p) or LOG_FILE_RE.search(p)]
     duplicate_reads = [p for p, c in Counter(read_paths).items() if c > 1]
+    file_tool_calls = tool_counts.get("Read", 0) + tool_counts.get("Glob", 0) + tool_counts.get("Grep", 0)
+    broad_globs = _broad_glob_calls(session)
 
     # Long prompts
     long_prompts = [t for t in user_turns if len(t.text) >= THRESHOLDS["long_prompt_chars"]]
@@ -59,9 +80,43 @@ def analyze_session(session: Session) -> SessionAnalysis:
             )
         )
 
+    very_long_prompts = [t for t in user_turns if len(t.text) >= THRESHOLDS["very_long_prompt_chars"]]
+    if very_long_prompts:
+        findings.append(
+            WasteFinding(
+                code="very_long_prompts",
+                title="Very long pasted specs",
+                severity="high",
+                detail=f"{len(very_long_prompts)} user message(s) exceeded {THRESHOLDS['very_long_prompt_chars']} characters.",
+                suggestion=(
+                    "Move specs to a doc or RULES file; in chat send only the active section plus "
+                    "goal, constraints, and done-when."
+                ),
+                score=len(very_long_prompts) * 5,
+            )
+        )
+
+    if user_turns and file_tool_calls >= THRESHOLDS["thin_prompt_file_tools"]:
+        short_prompts = [t for t in user_turns if 0 < len(t.text) < THRESHOLDS["thin_prompt_chars"]]
+        if len(short_prompts) >= 2 or (short_prompts and file_tool_calls >= THRESHOLDS["thin_prompt_file_tools"] + 4):
+            findings.append(
+                WasteFinding(
+                    code="thin_prompt_heavy_explore",
+                    title="Short prompts with heavy file exploration",
+                    severity="medium",
+                    detail=(
+                        f"{len(short_prompts)} short user message(s) (<{THRESHOLDS['thin_prompt_chars']} chars) "
+                        f"with {file_tool_calls} file-discovery tool calls."
+                    ),
+                    suggestion=(
+                        "Add target files, expected output, constraints, and done-when in one compact message."
+                    ),
+                    score=len(short_prompts) * 2 + file_tool_calls // 2,
+                )
+            )
+
     # Too many files in context (via Read/Glob/Grep)
-    file_tool_calls = tool_counts.get("Read", 0) + tool_counts.get("Glob", 0) + tool_counts.get("Grep", 0)
-    if file_tool_calls >= THRESHOLDS["many_file_reads"] or len(unique_reads) >= 8:
+    if file_tool_calls >= THRESHOLDS["many_file_reads"] or len(unique_reads) >= THRESHOLDS["unique_reads_min"]:
         findings.append(
             WasteFinding(
                 code="too_many_files",
@@ -73,6 +128,18 @@ def analyze_session(session: Session) -> SessionAnalysis:
                 ),
                 suggestion="Point Cursor at specific files. Add rules to avoid repo-wide scans unless necessary.",
                 score=file_tool_calls + len(unique_reads),
+            )
+        )
+
+    if broad_globs >= THRESHOLDS["broad_glob_calls"]:
+        findings.append(
+            WasteFinding(
+                code="broad_glob",
+                title="Repo-wide glob scans",
+                severity="high",
+                detail=f"{broad_globs} broad Glob pattern(s) (e.g. **/*) in this session.",
+                suggestion="Replace repo-wide globs with targeted paths or grep; keep the same goal, smaller search surface.",
+                score=broad_globs * 8,
             )
         )
 
@@ -127,7 +194,7 @@ def analyze_session(session: Session) -> SessionAnalysis:
     # Broad / vague questions
     broad = [t for t in user_turns if BROAD_QUESTION_RE.search(t.text)]
     vague = [t for t in user_turns if len(t.text) < 40 and VAGUE_QUESTION_RE.match(t.text.strip())]
-    if broad or (vague and file_tool_calls >= 8):
+    if broad or (vague and file_tool_calls >= THRESHOLDS["vague_explore_file_tools"]):
         findings.append(
             WasteFinding(
                 code="broad_questions",
