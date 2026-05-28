@@ -22,9 +22,6 @@ source .venv/bin/activate          # Windows: .venv\Scripts\Activate.ps1
 pip install -e .
 cursor-token-optimize --help       # run, analyze, create-rules, suggest
 ```
-
-If `python3 -m venv .venv` fails with an `ensurepip` error, use a Python build that includes `pip` (Homebrew, python.org installer, or `pyenv`), then retry setup. **Do not** pipe `get-pip.py` from the network into `python` — that pattern is unsafe (supply-chain risk) and unnecessary when you install Python properly.
-
 ## Quick start (recommended)
 
 After [Setup](#setup), one command scans **all** Cursor sessions, shows a report, asks where to install rules, and **updates** `.cursor/rules/token-optimize.mdc` in place (merging new tailored bullets):
