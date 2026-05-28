@@ -1,6 +1,6 @@
 # Cursor Token Optimize
 
-A **local CLI** that reads Cursor agent transcripts, finds likely token waste, and installs `.cursor/rules/token-optimize.mdc` into any project you choose.
+A **Local CLI** that reads Cursor agent transcripts, finds likely token waste, and installs `.cursor/rules/token-optimize.mdc` into any project you choose.
 
 Data source: `~/.cursor/projects/*/agent-transcripts/*.jsonl`. The tool is independent of the target project — install the CLI once, then write rules wherever you work.
 
@@ -8,7 +8,7 @@ Data source: `~/.cursor/projects/*/agent-transcripts/*.jsonl`. The tool is indep
 
 - Python 3.10+ (`python3 --version`)
 - Cursor with **Agent** mode (transcripts are created when the agent runs tools)
-- A terminal — no API keys or network access required
+- A terminal — no API keys or network access required; everything stays on your machine (reads ~/.cursor/projects/ transcripts, writes .cursor/rules/ in the project you choose; nothing is uploaded)
 
 ## Setup
 
