@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +8,8 @@ from pathlib import Path
 from cursor_token_optimize.models import Session, ToolCall, Turn
 
 CURSOR_PROJECTS = Path.home() / ".cursor" / "projects"
+# Skip oversized transcripts (DoS guard; typical sessions are far smaller).
+MAX_TRANSCRIPT_BYTES = 32 * 1024 * 1024
 USER_QUERY_RE = re.compile(r"<user_query>\s*(.*?)\s*</user_query>", re.DOTALL)
 TIMESTAMP_RE = re.compile(r"<timestamp>.*?</timestamp>\s*", re.DOTALL)
 NOISE_PATH_PARTS = (
@@ -58,6 +59,13 @@ def project_slug_matches(project_path: Path, slug: str) -> bool:
     return slug_lower == expected or slug_lower.endswith(expected.split("-")[-1])
 
 
+def transcript_too_large(path: Path, *, max_bytes: int = MAX_TRANSCRIPT_BYTES) -> bool:
+    try:
+        return path.stat().st_size > max_bytes
+    except OSError:
+        return True
+
+
 def discover_transcripts(
     *,
     project_path: Path | None = None,
@@ -82,6 +90,8 @@ def discover_transcripts(
 
         slug = transcript.parts[transcript.parts.index("projects") + 1] if "projects" in transcript.parts else ""
         if project_path is not None and not project_slug_matches(project_path, slug):
+            continue
+        if transcript_too_large(transcript):
             continue
 
         paths.append((mtime, transcript))
@@ -118,6 +128,12 @@ def _extract_content(record: dict) -> tuple[str, list[ToolCall]]:
 
 
 def parse_transcript(path: Path) -> Session:
+    if transcript_too_large(path):
+        raise ValueError(
+            f"Transcript exceeds {MAX_TRANSCRIPT_BYTES} bytes: {path}. "
+            "Skipped for safety; use a smaller export or raise MAX_TRANSCRIPT_BYTES locally."
+        )
+
     session_id = path.stem
     slug = ""
     parts = path.parts
@@ -127,30 +143,31 @@ def parse_transcript(path: Path) -> Session:
             slug = parts[idx + 1]
 
     turns: list[Turn] = []
-    for line_no, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    with path.open(encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
 
-        role = str(record.get("role") or "unknown")
-        text, tool_calls = _extract_content(record)
-        if role == "user":
-            text = strip_user_metadata(text)
+            role = str(record.get("role") or "unknown")
+            text, tool_calls = _extract_content(record)
+            if role == "user":
+                text = strip_user_metadata(text)
 
-        turn = Turn(
-            role=role,
-            text=text,
-            tool_calls=tool_calls,
-            estimated_tokens=estimate_tokens(text),
-        )
-        # Tool inputs add context too (especially Read outputs aren't here, but paths do)
-        for tc in tool_calls:
-            turn.estimated_tokens += estimate_tokens(json.dumps(tc.input, default=str)[:2000])
-        turns.append(turn)
+            turn = Turn(
+                role=role,
+                text=text,
+                tool_calls=tool_calls,
+                estimated_tokens=estimate_tokens(text),
+            )
+            # Tool inputs add context too (especially Read outputs aren't here, but paths do)
+            for tc in tool_calls:
+                turn.estimated_tokens += estimate_tokens(json.dumps(tc.input, default=str)[:2000])
+            turns.append(turn)
 
     try:
         modified_at = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
@@ -173,7 +190,13 @@ def load_sessions(
     limit: int = 20,
 ) -> list[Session]:
     transcripts = discover_transcripts(project_path=project_path, days=days, limit=limit)
-    return [parse_transcript(p) for p in transcripts]
+    sessions: list[Session] = []
+    for p in transcripts:
+        try:
+            sessions.append(parse_transcript(p))
+        except ValueError:
+            continue
+    return sessions
 
 
 def is_noise_path(path: str) -> bool:

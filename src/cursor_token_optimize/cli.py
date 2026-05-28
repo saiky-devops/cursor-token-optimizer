@@ -198,7 +198,7 @@ def build_parser() -> argparse.ArgumentParser:
     suggest.add_argument(
         "--apply",
         action="store_true",
-        help="Append suggested rules (backs up existing file first)",
+        help="Append suggested rules to the existing rules file",
     )
 
     return parser

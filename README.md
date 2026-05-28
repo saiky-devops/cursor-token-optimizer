@@ -23,19 +23,11 @@ pip install -e .
 cursor-token-optimize --help       # run, analyze, create-rules, suggest
 ```
 
-If `python3 -m venv .venv` fails with an `ensurepip` error, try:
-
-```bash
-python3.12 -m venv .venv           # or: /usr/local/bin/python3 -m venv .venv
-# fallback:
-python3 -m venv .venv --without-pip && source .venv/bin/activate
-curl -sS https://bootstrap.pypa.io/get-pip.py | python
-pip install -e .
-```
+If `python3 -m venv .venv` fails with an `ensurepip` error, use a Python build that includes `pip` (Homebrew, python.org installer, or `pyenv`), then retry setup. **Do not** pipe `get-pip.py` from the network into `python` — that pattern is unsafe (supply-chain risk) and unnecessary when you install Python properly.
 
 ## Quick start (recommended)
 
-After [Setup](#setup), one command scans **all** Cursor sessions, shows a report, asks where to install rules, backs up any existing file, and writes a new one:
+After [Setup](#setup), one command scans **all** Cursor sessions, shows a report, asks where to install rules, and **updates** `.cursor/rules/token-optimize.mdc` in place (merging new tailored bullets):
 
 ```bash
 cursor-token-optimize run
