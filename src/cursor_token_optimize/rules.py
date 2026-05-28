@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import shutil
-from datetime import datetime
 from pathlib import Path
 
 from cursor_token_optimize.models import AnalysisReport
@@ -24,51 +22,12 @@ alwaysApply: true
 """
 
 RULES_FILENAME = "token-optimize.mdc"
+TAILORED_HEADER = "# Tailored from recent Cursor sessions"
+SUGGEST_HEADER = "# Added by cursor-token-optimize suggest"
 
 
 def rules_path(project_path: Path) -> Path:
     return project_path / ".cursor" / "rules" / RULES_FILENAME
-
-
-def backup_rules_file(path: Path) -> Path | None:
-    """Copy existing rules to a timestamped backup. Returns backup path if created."""
-    if not path.exists():
-        return None
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup = path.parent / f"{path.stem}.backup.{timestamp}{path.suffix}"
-    shutil.copy2(path, backup)
-    return backup
-
-
-def build_rules_content(report: AnalysisReport | None = None) -> str:
-    """Baseline rules plus tailored bullets from session analysis."""
-    from cursor_token_optimize.report import rules_from_findings
-
-    sections = [DEFAULT_RULES.rstrip()]
-    if report and report.aggregate_findings:
-        tailored = rules_from_findings(report.aggregate_findings, existing_rules=DEFAULT_RULES)
-        if tailored:
-            sections.append("")
-            sections.append("# Tailored from recent Cursor sessions")
-            for item in tailored:
-                sections.append(f"- {item['rule']}")
-    sections.append("")
-    return "\n".join(sections)
-
-
-def install_rules(project_path: Path, content: str) -> tuple[Path, Path | None]:
-    """Write rules file, backing up any existing file first. Returns (path, backup_path)."""
-    path = rules_path(project_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    backup = backup_rules_file(path)
-    path.write_text(content, encoding="utf-8")
-    return path, backup
-
-
-def create_rules(project_path: Path, *, force: bool = False) -> Path:
-    """Write default rules. Backs up and replaces if the file already exists."""
-    path, _ = install_rules(project_path, build_rules_content())
-    return path
 
 
 def read_rules(project_path: Path) -> str | None:
@@ -76,6 +35,103 @@ def read_rules(project_path: Path) -> str | None:
     if not path.exists():
         return None
     return path.read_text(encoding="utf-8")
+
+
+def _section_index(content: str, header: str) -> int:
+    return content.find(header)
+
+
+def _base_before_sections(content: str) -> str:
+    """Keep frontmatter and baseline; drop optional sections we manage."""
+    cut = len(content)
+    for header in (TAILORED_HEADER, SUGGEST_HEADER):
+        idx = _section_index(content, header)
+        if idx != -1:
+            cut = min(cut, idx)
+    return content[:cut].rstrip()
+
+
+def _tailored_bullets(content: str) -> list[str]:
+    idx = _section_index(content, TAILORED_HEADER)
+    if idx == -1:
+        return []
+    rest = content[idx + len(TAILORED_HEADER) :]
+    for header in (SUGGEST_HEADER,):
+        end = _section_index(rest, header)
+        if end != -1:
+            rest = rest[:end]
+    bullets: list[str] = []
+    for line in rest.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            bullets.append(stripped[2:])
+    return bullets
+
+
+def _suffix_after_tailored(content: str) -> str:
+    """Preserve suggest-append section and anything after tailored block."""
+    idx = _section_index(content, TAILORED_HEADER)
+    if idx == -1:
+        suggest_idx = _section_index(content, SUGGEST_HEADER)
+        return content[suggest_idx:].rstrip() if suggest_idx != -1 else ""
+
+    after = content[idx + len(TAILORED_HEADER) :]
+    suggest_idx = _section_index(after, SUGGEST_HEADER)
+    if suggest_idx == -1:
+        return ""
+    return after[suggest_idx:].rstrip()
+
+
+def build_rules_content(
+    report: AnalysisReport | None = None,
+    *,
+    project_path: Path | None = None,
+) -> str:
+    """Write or merge rules: keep existing file, append new tailored bullets only."""
+    from cursor_token_optimize.report import rules_from_findings
+
+    existing = read_rules(project_path) if project_path else None
+    if existing:
+        base = _base_before_sections(existing)
+        tailored_bullets = _tailored_bullets(existing)
+        suffix = _suffix_after_tailored(existing)
+        existing_for_dedup = existing
+    else:
+        base = DEFAULT_RULES.rstrip()
+        tailored_bullets = []
+        suffix = ""
+        existing_for_dedup = DEFAULT_RULES
+
+    if report and report.aggregate_findings:
+        for item in rules_from_findings(report.aggregate_findings, existing_for_dedup):
+            rule = item["rule"]
+            if rule not in tailored_bullets:
+                tailored_bullets.append(rule)
+
+    sections = [base]
+    if tailored_bullets:
+        sections.append("")
+        sections.append(TAILORED_HEADER)
+        for rule in tailored_bullets:
+            sections.append(f"- {rule}")
+    if suffix:
+        sections.append("")
+        sections.append(suffix)
+    sections.append("")
+    return "\n".join(sections)
+
+
+def install_rules(project_path: Path, content: str) -> Path:
+    """Update rules file in place (no backup)."""
+    path = rules_path(project_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def create_rules(project_path: Path, *, force: bool = False) -> Path:
+    """Create or update rules in the project rules file."""
+    return install_rules(project_path, build_rules_content(project_path=project_path))
 
 
 def append_suggested_rules(project_path: Path, new_bullets: list[str]) -> Path:
@@ -87,6 +143,15 @@ def append_suggested_rules(project_path: Path, new_bullets: list[str]) -> Path:
     existing = read_rules(project_path) or DEFAULT_RULES.rstrip()
     if not existing.endswith("\n"):
         existing += "\n"
-    content = existing + "\n# Added by cursor-token-optimize suggest\n" + "\n".join(additions) + "\n"
-    installed, _ = install_rules(project_path, content)
-    return installed
+    if SUGGEST_HEADER in existing:
+        content = existing.rstrip() + "\n" + "\n".join(additions) + "\n"
+    else:
+        content = (
+            existing
+            + "\n"
+            + SUGGEST_HEADER
+            + "\n"
+            + "\n".join(additions)
+            + "\n"
+        )
+    return install_rules(project_path, content)

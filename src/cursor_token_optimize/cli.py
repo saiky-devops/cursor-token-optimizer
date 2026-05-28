@@ -69,9 +69,9 @@ def cmd_run(args: argparse.Namespace, console: Console) -> int:
     print_report(console, report)
 
     project = _resolve_project(args.project) if args.project else _prompt_project_path(console)
-    content = build_rules_content(report)
-    path, backup = install_rules(project, content)
-    print_rules_installed(console, project, path, backup)
+    content = build_rules_content(report, project_path=project)
+    path = install_rules(project, content)
+    print_rules_installed(console, project, path)
     return 0
 
 
@@ -84,11 +84,12 @@ def cmd_analyze(args: argparse.Namespace, console: Console) -> int:
 
 def cmd_create_rules(args: argparse.Namespace, console: Console) -> int:
     project = _resolve_project(args.project)
-    content = build_rules_content() if not args.tailored else build_rules_content(
-        analyze_project(project_path=None, days=30, limit=20)
+    report = (
+        analyze_project(project_path=None, days=30, limit=20) if args.tailored else None
     )
-    path, backup = install_rules(project, content)
-    print_rules_create(console, path, backup)
+    content = build_rules_content(report, project_path=project)
+    path = install_rules(project, content)
+    print_rules_create(console, path)
     return 0
 
 
@@ -148,7 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = sub.add_parser(
         "run",
-        help="Analyze all sessions, prompt for project path, install rules (with backup)",
+        help="Analyze all sessions, prompt for project path, update rules in place",
         parents=[shared],
     )
     _add_common_args(run)
@@ -168,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     create = sub.add_parser(
         "create-rules",
-        help="Install .cursor/rules/token-optimize.mdc (with backup)",
+        help="Install or update .cursor/rules/token-optimize.mdc in place",
         parents=[shared],
     )
     create.add_argument(

@@ -296,21 +296,12 @@ def print_suggestions(
         console.print()
 
 
-def print_rules_installed(
-    console: Console,
-    project: Path,
-    path: Path,
-    backup: Path | None,
-) -> None:
+def print_rules_installed(console: Console, project: Path, path: Path) -> None:
     if _use_plain(console):
         print("")
-        print("Rules installed")
+        print("Rules updated")
         print(f"  Project: {project}")
         print(f"  File:    {path}")
-        if backup:
-            print(f"  Backup:  {backup}")
-        else:
-            print("  Backup:  (none — no previous file)")
         print("")
         print(
             "Open this project in Cursor and commit .cursor/rules/token-optimize.mdc to share with your team."
@@ -320,18 +311,17 @@ def print_rules_installed(
     lines = [
         f"[dim]Project[/] {project}",
         f"[dim]File[/]    {path}",
-        f"[dim]Backup[/]  {backup if backup else '(none — no previous file)'}",
         "",
         "Open this project in Cursor and commit .cursor/rules/token-optimize.mdc to share with your team.",
     ]
     console.print()
-    console.print(Panel("\n".join(lines), title="[bold green]Rules installed[/]", border_style="green"))
+    console.print(Panel("\n".join(lines), title="[bold green]Rules updated[/]", border_style="green"))
 
 
 def print_rules_updated(console: Console, path: Path) -> None:
     if _use_plain(console):
         print("")
-        print(f"Updated rules (with backup): {path}")
+        print(f"Updated rules: {path}")
         return
 
     console.print()
@@ -339,23 +329,17 @@ def print_rules_updated(console: Console, path: Path) -> None:
         Panel(
             str(path),
             title="[bold green]Updated rules[/]",
-            subtitle="Previous file backed up",
             border_style="green",
         )
     )
 
 
-def print_rules_create(console: Console, path: Path, backup: Path | None) -> None:
+def print_rules_create(console: Console, path: Path) -> None:
     if _use_plain(console):
-        print(f"Installed rules: {path}")
-        if backup:
-            print(f"Previous file backed up to: {backup}")
+        print(f"Updated rules: {path}")
         return
 
-    lines = [f"[dim]File[/] {path}"]
-    if backup:
-        lines.append(f"[dim]Backup[/] {backup}")
-    console.print(Panel("\n".join(lines), title="[bold green]Installed rules[/]", border_style="green"))
+    console.print(Panel(f"[dim]File[/] {path}", title="[bold green]Rules updated[/]", border_style="green"))
 
 
 def print_nothing_to_apply(console: Console) -> None:

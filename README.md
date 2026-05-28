@@ -53,11 +53,7 @@ Enter the app where you want rules, e.g. `/Users/you/projects/my-app`. The tool 
 my-app/.cursor/rules/token-optimize.mdc
 ```
 
-If that file already exists, a backup is created first:
-
-```text
-my-app/.cursor/rules/token-optimize.backup.20260525-153045.mdc
-```
+If that file already exists, new tailored bullets are merged into it (your baseline and prior rules are kept).
 
 Skip the prompt in scripts:
 
@@ -73,9 +69,9 @@ Other subcommands and flags:
 |---------|---------|
 | **`run`** | Full workflow — see [Quick start](#quick-start-recommended) |
 | `analyze` | Print a waste report only |
-| `create-rules` | Install baseline rules to `--project` (with backup) |
+| `create-rules` | Install or update baseline rules at `--project` |
 | `suggest` | Show tailored rule suggestions |
-| `suggest --apply` | Append suggestions (backs up existing file first) |
+| `suggest --apply` | Append new suggestions to the existing rules file |
 
 ### Common flags
 
@@ -134,10 +130,9 @@ Quick actions
 After `run` installs rules, you get a success panel:
 
 ```text
-Rules installed
+Rules updated
   Project: /path/to/my-app
   File:    /path/to/my-app/.cursor/rules/token-optimize.mdc
-  Backup:  /path/to/my-app/.cursor/rules/token-optimize.backup.20260526-203814.mdc
 ```
 
 Numbers and findings depend on your local Cursor agent transcripts.
